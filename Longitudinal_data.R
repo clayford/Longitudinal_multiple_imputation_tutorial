@@ -7,7 +7,7 @@
 #          Author responsible for the code:  Rushani Wijesuriya    
 ###################################################################################################################
 
-rm(list = ls())
+# rm(list = ls())
 
 library(jomo)
 library(mitml)
@@ -17,7 +17,7 @@ library(mitools)
 library(micemd)
 
 # set working directory
-setwd("~/Multilevel MI- Tutorial paper/Longitudinal_Tutorial")
+# setwd("~/Multilevel MI- Tutorial paper/Longitudinal_Tutorial")
 
 # load the data
 CATS_long <- read.csv("CATS_dataL.csv", header = T)
@@ -25,6 +25,9 @@ summary(CATS_long)
 
 # check missing data proportions
 sum(complete.cases(CATS_long))
+mean(!complete.cases(CATS_long)) # 0.46
+
+mice::md.pattern(CATS_long)
 
 # fit analysis models
 
@@ -34,66 +37,106 @@ lmer(numeracy_score ~ prev_dep + time + age + numeracy_scoreW1 + sex +
 
 # 3-level
 lmer(numeracy_score ~ prev_dep + time + age + numeracy_scoreW1 + sex +
-    factor(ses) + (1 | id), data = CATS_long)
+    factor(ses) + (1 | school/id), data = CATS_long)
 
 ###------------------------------------Illustration of the reshape() function--------------------------------------------
 
 # Reshaping CATS_long (in long format) to wide format
-CATS_wide <- reshape(CATS_long, v.names = c("numeracy_score", "prev_dep",
-    "prev_sdq"), timevar = "time", idvar = "id", direction = "wide")
+CATS_wide <- reshape(CATS_long, 
+                     v.names = c("numeracy_score", "prev_dep", "prev_sdq"),
+                     timevar = "time", 
+                     idvar = "id", 
+                     direction = "wide")
+
+# CF: using pivot_wider
+CATS_wide <- CATS_long |> 
+  pivot_wider(
+    names_from = time,
+    values_from = c(prev_dep, numeracy_score, prev_sdq), 
+    names_sep = ".")
+
 
 # Reshaping CATS_wide (in wide format) to long format
-CATS_long <- reshape(CATS_wide, varying = list(c("prev_dep.3", "prev_dep.5",
-    "prev_dep.7"), c("numeracy_score.3", "numeracy_score.5", "numeracy_score.7"),
-    c("prev_sdq.3", "prev_sdq.5", "prev_sdq.7")), idvar = "id", v.names = c("prev_dep",
-    "numeracy_score", "prev_sdq"), times = c(3, 5, 7), direction = "long")
+CATS_long <- reshape(CATS_wide, 
+                     varying = list(c("prev_dep.3",
+                                      "prev_dep.5",
+                                      "prev_dep.7"),
+                                    c("numeracy_score.3", 
+                                      "numeracy_score.5",
+                                      "numeracy_score.7"),
+                                    c("prev_sdq.3",
+                                      "prev_sdq.5",
+                                      "prev_sdq.7")), 
+                     idvar = "id", 
+                     v.names = c("prev_dep",
+                                 "numeracy_score",
+                                 "prev_sdq"), 
+                     times = c(3, 5, 7), 
+                     direction = "long")
+
+# CF: Using pivot_longer
+CATS_long <- CATS_wide |> 
+  pivot_longer(cols = numeracy_score.3:prev_sdq.7, 
+               names_to = c(".value", "time"), 
+               names_sep = "\\.")
+
+# or this
+CATS_long <- CATS_wide |> 
+  pivot_longer(cols = -c(1:6), 
+               names_to = c(".value", "time"), 
+               names_sep = "\\.")
+
 
 ###-------------------------------------------Imputing in wide format-----------------------------------------------------
+
+# Section 3.1.1
 
 #-------------------------#
 # Approach 1: JM-1L-wide  #
 #-------------------------#
 
-# To ensure correct function is used,set binary and categorical
-# variables to impute as factors
+# To ensure correct function is used, set binary and categorical variables to
+# impute as factors
 cat.vars <- c("ses", "prev_dep.3", "prev_dep.5", "prev_dep.7")
 CATS_wide[cat.vars] <- lapply(CATS_wide[cat.vars], factor)
 
 ######### Create imputations using jomo->jomo1->jomo1mix
 
 # Step 1: Create a data frame with variables to be imputed
+
 dataw_inc <- CATS_wide[, substr(names(CATS_wide), 1, 6) %in% c("prev_d",
     "numera", "ses")]
 
-# Step 2: Create a data frame with complete variables to be used as
-# predictors of the imputation model Note: A column of 1's must be
-# included for the intercept Fully observed binary covariates(such as
-# sex in this example)can be included as type numeric.  To include
-# fully observed categorical variables with k (>2) categories, (k-1)
-# dummy variables need to be created.
+# Step 2: Create a data frame with complete variables to be used as predictors
+# of the imputation model Note: A column of 1's must be included for the
+# intercept. Fully observed binary covariates (such as sex in this example) can
+# be included as type numeric.  To include fully observed categorical variables
+# with k (>2) categories, (k-1) dummy variables need to be created.
+
 dataw_comp <- cbind(Intercept = rep(1, nrow(CATS_wide)), CATS_wide[, substr(names(CATS_wide),
     1, 6) %in% c("age", "sex", "prev_s")])
 
-# Step 3: Perform imputations (set number of imputations using nimp,
-# burn in iterations using nburn and between imputations using
-# between options)
+# Step 3: Perform imputations (set number of imputations using nimp, burn in
+# iterations using nburn and between imputations using between options)
+# CF: This takes a while to run; I changed nimp to 5
 set.seed(2946)
-imp1 <- jomo(Y = dataw_inc, X = dataw_comp, nimp = 66, nburn = 1000, nbetween = 1000)
+imp1 <- jomo(Y = dataw_inc, X = dataw_comp, nimp = 5, nburn = 1000, nbetween = 1000)
 
 # Step 4 : Check convergence of imputation procedure
 set.seed(2946)
 impCheck <- jomo.MCMCchain(Y = dataw_inc, X = dataw_comp, nburn = 1000)
 
-# outputs of jomo.MCMCchain() are : (1)finimp:the final state of the
-# data set, which would be the first imputation if we ran the jomo
-# function with nburn burn-in iterations; (2)collectbeta: fixed
-# effect parameter draws at each of the nburn iterations;
-# (3)collectomega: level-1 covariance matrix draws at each of the
-# nburn iterations; Convergence of the sampler can be assessed by
-# looking at the trace plot for each parameter.  Below we plot for
-# beta 0,1
-plot(c(1:1000), impCheck$collectbeta[1, 1, 1:1000], type = "l", ylab = expression(beta["0,1"]),
-    xlab = "Iteration number")
+# outputs of jomo.MCMCchain() are : 
+
+# - (1)finimp:the final state of the data set, which would be the first imputation if we ran the jomo function with nburn burn-in iterations; 
+# - (2)collectbeta: fixed effect parameter draws at each of the nburn iterations;
+# - (3)collectomega: level-1 covariance matrix draws at each of the nburn iterations;
+
+# Convergence of the sampler can be assessed by looking at the trace plot for
+# each parameter.  Below we plot for beta 0,1
+plot(c(1:1000), impCheck$collectbeta[1, 1, 1:1000], 
+     type = "l", ylab = expression(beta["0,1"]),
+     xlab = "Iteration number")
 
 ######### Analyze imputed data by fitting substantive model to each
 ######### imputed data set and combine using Rubins rules
@@ -116,7 +159,10 @@ fit.imp1 <- lapply(imp.long, function(d) {
 })
 
 # Step 4: Pool the results
-testEstimates(fit.imp1, extra.pars = TRUE)
+mitml::testEstimates(fit.imp1, extra.pars = TRUE)
+
+
+# Section 3.1.2
 
 #----------------------------#
 # Approach 2: FCS-1L-wide    #
@@ -129,32 +175,43 @@ CATS_wide[cat.vars] <- lapply(CATS_wide[cat.vars], factor)
 ######### Create imputations
 
 # Step 1: Set predictor matrix
-# In the predictor matrix, a value of 0: Indicates that the column
-# variable is not used as predictor for the row variable 1: Indicates
-# that the column variable is used as a predictor with a fixed effect
-# for the row variable 2: Indicates that the column variable is used
-# as a predictor with a fixed and a random effect for the row
+
+# In the predictor matrix...
+
+# 0: Indicates that the column variable is not used as predictor for the row
 # variable
+
+# 1: Indicates that the column variable is used as a predictor with a fixed
+# effect for the row variable
+
+# 2: Indicates that the column variable is used as a predictor with a fixed and
+# a random effect for the row variable
+
 #-2: Indicates that column variable is the cluster/group variable (Only one variable is allowed)
+
+# CF: set cluster variables to 0 to omit them from predictor sets for all
+# variables
 pred1 <- make.predictorMatrix(CATS_wide)
 pred1[, c("id", "school")] <- 0
 
-# Step 2: Set imputation methods (logreg,norm,and polr for specifying
-# a logistic regression model,linear regression model and a
-# proportional odds model respectively)
+# Step 2: Set imputation methods (logreg,norm,and polr for specifying a logistic
+# regression model,linear regression model and a proportional odds model
+# respectively)
 meth1 <- make.method(CATS_wide)
 meth1[substr(names(CATS_wide), 1, 6) %in% c("prev_d")] <- "logreg"
 meth1[substr(names(CATS_wide), 1, 6) %in% c("numera")] <- "norm"
 meth1[substr(names(CATS_wide), 1, 5) %in% c("ses")] <- "polr"
 
-# Step 3: Perform imputations(set number of imputations using
-# m,predictors using predictorMatrix imputation method using method
-# and burn in iterations using maxit options)
+# Step 3: Perform imputations (set number of imputations using m,predictors using
+# predictorMatrix imputation method using method and burn in iterations using
+# maxit options)
 set.seed(3726)
-imp2 <- mice(data = CATS_wide, m = 66, predictorMatrix = pred1, method = meth1,
-    maxit = 10)
+imp2 <- mice(data = CATS_wide, m = 5, 
+             predictorMatrix = pred1, 
+             method = meth1,
+             maxit = 10)
 
-# Step 4: Check convergence
+# Step 4: Check convergence (trace plots)
 plot(imp2, c("prev_dep.3", "prev_dep.5", "prev_dep.7"))
 
 ######### Analyze imputed data by fitting substantive model to each
@@ -179,6 +236,8 @@ fit.imp2 <- lapply(imp.long, function(d) {
 
 # Step 4: Pool the results
 testEstimates(fit.imp2, extra.pars = TRUE)
+
+# Section 3.1.3
 
 #---------------------------------#
 # Approach 3: FCS-1L-wide-MTW     #
@@ -248,6 +307,8 @@ testEstimates(fit.imp3, extra.pars = TRUE)
 
 ###------------------------------------------------------Imputing in long format--------------------------------------------
 
+# Section 3.2.1
+
 #-------------------------#
 # Approach 4: JM-2L       #
 #-------------------------#
@@ -262,12 +323,12 @@ CATS_long[, "prev_dep"] <- as.factor(CATS_long[, "prev_dep"])
 # Step 1: Create a data frame with variables to be imputed
 
 # Level 1 variables
-dataL_inc1 <- data.frame(prev_dep = CATS_long[, c("prev_dep")], numeracy_score = CATS_long[,
-    c("numeracy_score")])
+dataL_inc1 <- data.frame(prev_dep = CATS_long[, c("prev_dep")], 
+                         numeracy_score = CATS_long[,c("numeracy_score")])
 
 # Level 2 variables
-dataL_inc2 <- data.frame(ses = CATS_long[, c("ses")], numeracy_scoreW1 = CATS_long[,
-    c("numeracy_scoreW1")])
+dataL_inc2 <- data.frame(ses = CATS_long[, c("ses")], 
+                         numeracy_scoreW1 = CATS_long[,c("numeracy_scoreW1")])
 
 
 # Step 2: Create a data frame with complete variables to be used as
@@ -278,43 +339,59 @@ dataL_inc2 <- data.frame(ses = CATS_long[, c("ses")], numeracy_scoreW1 = CATS_lo
 # k (>2) categories, (k-1) dummy variables need to be created.
 
 # Level 1 variables
-dataL_compFE1 <- cbind(Intercept = rep(1, nrow(CATS_long)), CATS_long[,
-    substr(names(CATS_long), 1, 6) %in% c("age", "sex", "prev_s", "time")])
+dataL_compFE1 <- cbind(Intercept = rep(1, nrow(CATS_long)), 
+                       CATS_long[,substr(names(CATS_long), 1, 6) %in% 
+                                   c("age", "sex", "prev_s", "time")])
 
 # Level 2 variables
-dataL_compFE2 <- cbind(Intercept = rep(1, nrow(CATS_long)), CATS_long[,
-    substr(names(CATS_long), 1, 6) %in% c("age", "sex")])
+dataL_compFE2 <- cbind(Intercept = rep(1, nrow(CATS_long)), 
+                       CATS_long[,substr(names(CATS_long), 1, 6) %in% 
+                                   c("age", "sex")])
 
-# Step 3: Create a data frame with complete variables to be used as
-# predictors of the imputation model, with RANDOM EFFECTS Note: A
-# column of 1's must be included for the random intercept Fully
-# observed binary covariates can be included as type numeric.  To
-# include fully observed categorical variables with k (>2)
-# categories, (k-1) dummy variables need to be created.
-dataL_compRE <- cbind(Intercept = rep(1, nrow(CATS_long)), time = CATS_long[,
-    "time"])
+# Step 3: Create a data frame with complete variables to be used as predictors
+# of the imputation model, with RANDOM EFFECTS.
 
-## Step 4: Perform imputations (set number of imputations using nimp,
-## burn in iterations using nburn and between imputations using
-## between options, meth='random' invokes heterogeneous covariance
-## matrices)
+# Note: A column of 1's must be included for the random intercept. Fully observed
+# binary covariates can be included as type numeric.  To include fully observed
+# categorical variables with k (>2) categories, (k-1) dummy variables need to be
+# created.
+dataL_compRE <- cbind(Intercept = rep(1, nrow(CATS_long)), 
+                      time = CATS_long[,"time"])
+
+## Step 4: Perform imputations (set number of imputations using nimp, burn in
+## iterations using nburn and between imputations using between options,
+## meth='random' invokes heterogeneous covariance matrices)
 set.seed(7251)
-imp4 <- jomo(Y = dataL_inc1, Y2 = dataL_inc2, X = dataL_compFE1, X2 = dataL_compFE2,
-    Z = dataL_compRE, clus = CATS_long$id, nimp = 66, nburn = 1000, nbetween = 1000)
+imp4 <- jomo(Y = dataL_inc1, Y2 = dataL_inc2, 
+             X = dataL_compFE1, X2 = dataL_compFE2,
+             Z = dataL_compRE, 
+             clus = CATS_long$id, 
+             nimp = 5, 
+             nburn = 1000, 
+             nbetween = 1000)
 
-# #check convergence set.seed(7251)
-# impCheck<-jomo.MCMCchain(Y=dataL_miss1, Y2=dataL_miss2,
-# X=dataL_compFE1, X2=dataL_compFE2,
-# meth='random',Z=dataL_compRE,clus=CATS_dataL$c_id,nburn=1000)
-# #outputs of jomo.MCMCchain() are : #(1)finimp:the final state of
-# the data set, which would be the first imputation if we ran the
-# jomo #function with nburn burn-in iterations; #(2)collectbeta:
-# fixed effect parameter draws at each of the nburn iterations;
-# #(3)collectomega: level-1 covariance matrix draws at each of the
-# nburn iterations; #Convergence of the sampler can be assessed by
-# looking at the trace plot for each parameter.  #Below we plot for
-# beta 0,1 plot(c(1:1000),impCheck$collectbeta[1,1,1:1000],type='l',
-# ylab=expression(beta['0,1']), xlab='Iteration number')
+#check convergence 
+set.seed(7251)
+impCheck<-jomo.MCMCchain(Y=dataL_miss1, Y2=dataL_miss2,
+                         X=dataL_compFE1, X2=dataL_compFE2,
+                         meth='random',Z=dataL_compRE,
+                         clus=CATS_dataL$c_id,nburn=1000)
+
+# #outputs of jomo.MCMCchain() are: 
+
+# (1)finimp:the final state of the data set, which would be the first imputation
+# if we ran the jomo #function with nburn burn-in iterations;
+
+#(2)collectbeta: fixed effect parameter draws at each of the nburn iterations;
+
+#(3)collectomega: level-1 covariance matrix draws at each of the nburn iterations;
+
+# Convergence of the sampler can be assessed by looking at the trace plot for
+# each parameter.
+
+# Below we plot for beta 0,1 
+plot(c(1:1000),impCheck$collectbeta[1,1,1:1000],type='l',
+     ylab=expression(beta['0,1']), xlab='Iteration number')
 
 
 ######### Analyze imputed data by fitting substantive model to each
@@ -333,6 +410,7 @@ fit.imp4 <- lapply(imp.list, function(d) {
 # Step 3: Pool the results
 testEstimates(fit.imp4, extra.pars = TRUE)
 
+# Section 3.2.2
 
 #-------------------------#
 # Approach 5: FCS-2L      #
@@ -345,39 +423,66 @@ CATS_long[cat.vars] <- lapply(CATS_long[cat.vars], factor)
 ######### Create imputations
 
 # Step 1: Set predictor matrix
-# In the predictor matrix, a value of 0: Indicates that the column
-# variable is not used as predictor for the row variable 1: Indicates
-# that the column variable is used as a predictor with a fixed effect
-# for the row variable 2: Indicates that the column variable is used
-# as a predictor with a fixed and a random effect for the row
+
+# In the predictor matrix, a value of....
+
+# 0: Indicates that the column variable is not used as predictor for the row
 # variable
-#-2: Indicates that column variable is the cluster/group variable (Only one variable is allowed)
-# 3: Indicates that the cluster means of the covariates are added as
-# a predictor to the imputation model.
+
+# 1: Indicates that the column variable is used as a predictor with a fixed
+# effect for the row variable
+
+# 2: Indicates that the column variable is used as a predictor with a fixed and
+# a random effect for the row variable
+
+# -2: Indicates that column variable is the cluster/group variable (Only one variable is allowed)
+
+# 3: Indicates that the cluster means of the covariates are added as a predictor
+# to the imputation model.
+
 pred3 <- make.predictorMatrix(CATS_long)
 pred3[, c("school", "id")] <- 0
-pred3[, c("id")] <- -2
+pred3[c("school", "id"),] <- 0
+pred3[-1, c("id")] <- -2    # indicate the cluster group
 pred3[c("ses", "numeracy_scoreW1"), c("time")] <- 0
-pred3[c("prev_dep", "numeracy_score"), c("time")] <- 2
+
+# CF: removing this prevents the isSingular warnings
+# pred3[c("prev_dep", "numeracy_score"), c("time")] <- 2
+
 pred3[c("prev_dep"), c("numeracy_score","prev_sdq")] <- 3
 pred3[c("numeracy_score"), c("prev_dep","prev_sdq")] <- 3
 
+# CF: the following take too long and crash R if you try to stop it
+# Step 2: Set imputation methods
+# meth3 <- make.method(CATS_long)
+# meth3["prev_dep"] <- "2l.jomo"
+# meth3["numeracy_score"] <- "2l.pan"
+# meth3["ses"] <- "2lonly.pmm"
+# meth3["numeracy_scoreW1"] <- "2lonly.norm"
+
+# CF: I re-specified the methods (see Ch 7 of FIMD)
+# https://stefvanbuuren.name/fimd/sec-mlguidelines.html
+
 # Step 2: Set imputation methods
 meth3 <- make.method(CATS_long)
-meth3["prev_dep"] <- "2l.jomo"
-meth3["numeracy_score"] <- "2l.pan"
+meth3["prev_dep"] <- "2l.pmm" 
+meth3["numeracy_score"] <- "2l.pmm" 
 meth3["ses"] <- "2lonly.pmm"
-meth3["numeracy_scoreW1"] <- "2lonly.norm"
+meth3["numeracy_scoreW1"] <- "2lonly.pmm"
 
-# Step 3: Perform imputations(set number of imputations using
-# m,predictors using predictorMatrix imputation method using method
-# and burn in iterations using maxit options)
+
+# Step 3: Perform imputations (set number of imputations using m, predictors
+# using predictorMatrix imputation method using method, and burn in iterations
+# using maxit options)
+library(miceadds)
 set.seed(3528)
-imp5 <- mice(data = CATS_long, m = 66, predictorMatrix = pred3, method = meth3,
-    maxit = 10)
+imp5 <- mice(data = CATS_long, m = 5, 
+             predictorMatrix = pred3, 
+             method = meth3,
+             maxit = 10)
 
 ######### Analyze imputed data by fitting substantive model to each
-######### imputed data set and combine using Rubins rules
+######### imputed data set and combine using Rubin's rules
 
 # Step 1: Extract imputed datasets and store in a list
 imp.list <- complete(imp5, "all")
