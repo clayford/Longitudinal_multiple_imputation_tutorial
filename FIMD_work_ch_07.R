@@ -12,10 +12,19 @@ md.pattern(dat)
 
 # 7.10.1 ------------------------------------------------------------------
 
-
+# Intercept-only model; just need outcome and cluster variable
 d <- brandsma[, c("sch", "lpo")]
+
+# A cell with a “1” indicates that the column variable is included as a
+# predictor in the imputation model for the row variable and “0” indicates that
+# the column variable is omitted.
 pred <- make.predictorMatrix(d)
+pred
+# The code -2 in the predictor matrix pred signals that sch is the cluster variable. 
 pred["lpo", "sch"] <- -2
+pred
+
+library(miceadds) # for mice.impute.2l.pmm
 imp <- mice(d, pred = pred, meth = "2l.pmm", m = 10, maxit = 1,
             print = FALSE, seed = 152)
 library(lme4)
@@ -28,9 +37,12 @@ testEstimates(as.mitml.result(fit), extra.pars = TRUE)$extra.pars
 
 # 7.10.2 ------------------------------------------------------------------
 
+# Random intercepts, missing level-1 predictor
+# There are missing data in both lpo and iqv
 
 d <- brandsma[, c("sch", "lpo", "iqv")]
 pred <- make.predictorMatrix(d)
+pred
 
 # An entry of -2 in the predictor matrix signals the cluster variable, whereas
 # an entry of 3 indicates that the cluster means of the covariates are added as
@@ -46,7 +58,7 @@ pred
 # choice.
 
 imp <- mice(d, pred = pred, meth = "2l.pmm", seed = 919,
-            m = 10, print = FALSE)
+            m = 10, print = TRUE)
 fit <- with(imp, lmer(lpo ~  iqv + (1 | sch), REML = FALSE))
 summary(pool(fit))
 testEstimates(as.mitml.result(fit), extra.pars = TRUE)$extra.pars
@@ -54,17 +66,19 @@ testEstimates(as.mitml.result(fit), extra.pars = TRUE)$extra.pars
 
 # 7.10.3 ------------------------------------------------------------------
 
-
+# The ordinary least squares estimator does not distinguish between regressions
+# within groups and between group. This section shows how we can allow for
+# differences in the within- and between-group regressions.
 
 library(dplyr)
-res <- mice::complete(imp, "long")  |> 
-  group_by(sch, .imp) |>
-  mutate(iqm = mean(iqv)) |>
-  group_by(.imp) |>
-  do(model = lmer(lpo ~ iqv + iqm + (1 | sch),
-                  REML = FALSE, data = .)) |>
-  as.list() |> .[[-1]]
-summary(pool(res))
+# res <- mice::complete(imp, "long")  |> 
+#   group_by(sch, .imp) |>
+#   mutate(iqm = mean(iqv)) |>
+#   group_by(.imp) |>
+#   do(model = lmer(lpo ~ iqv + iqm + (1 | sch),
+#                   REML = FALSE, data = .)) |>
+#   as.list() |> .[[-1]]
+# summary(pool(res))
 
 # CF: updated code that doesn't use superceded `do()` function
 res <- mice::complete(imp, "long")  |> 
@@ -78,8 +92,12 @@ res <- mice::complete(imp, "long")  |>
   purrr::pluck("model")
 
 summary(pool(res))
+testEstimates(as.mitml.result(res), extra.pars = TRUE)$extra.pars
 
-# 7.10.4
+
+# 7.10.4 ------------------------------------------------------------------
+
+# Random intercepts, missing level-2 predictor
 
 d <- brandsma[, c("sch", "lpo", "iqv", "den")]
 
@@ -88,9 +106,15 @@ d <- brandsma[, c("sch", "lpo", "iqv", "den")]
 # it is missing for the entire cluster. Imputing a missing level-2 predictor is
 # done by forming an imputation model at the cluster level.
 
+# The following code block imputes missing values in the 2-level predictor den.
+# For reasons of simplicity, I have used 2lonly.pmm, so imputations adhere to
+# original four-point scale.
+
 meth <- make.method(d)
+meth
 meth[c("lpo", "iqv", "den")] <- c("2l.pmm", "2l.pmm",
                                   "2lonly.pmm")
+meth
 # 2lonly.pmm aggregates level-1 predictors and imputes the level-2 variable by
 # predictive mean matching.
 
@@ -98,14 +122,27 @@ meth[c("lpo", "iqv", "den")] <- c("2l.pmm", "2l.pmm",
 # to all members within the same class
 
 pred <- make.predictorMatrix(d)
+pred
+#     sch lpo iqv den
+# sch   0   1   1   1
+# lpo   1   0   1   1
+# iqv   1   1   0   1
+# den   1   1   1   0
+
+# Recall: an entry of 3 indicates that the cluster means of the covariates are
+# added as a predictor to the imputation model.
+
 pred["lpo", ] <- c(-2, 0, 3, 1)
 pred["iqv", ] <- c(-2, 3, 0, 1)
 pred["den", ] <- c(-2, 1, 1, 0)
+pred
 imp <- mice(d, pred = pred, meth = meth, seed = 418,
-            m = 10, print = FALSE)
-# Fig 7.6
+            m = 10, print = TRUE)
+
+# Fig 7.6 (bottom)
 densityplot(imp, ~ lpo + den)
 
+# The complete-data analysis on the multiply imputed data can be fitted as
 fit <- with(imp, lmer(lpo ~ 1 + iqv + as.factor(den)
                       + (1 | sch), REML = FALSE))
 summary(pool(fit))
@@ -114,9 +151,10 @@ testEstimates(as.mitml.result(fit), extra.pars = TRUE)$extra.pars
 
 # 7.10.5 ------------------------------------------------------------------
 
-
+# Random intercepts, interactions
 
 d <- brandsma[, c("sch", "lpo", "iqv", "sex", "den")]
+head(d)
 
 # The new variables lpm, iqm and sxm will hold the cluster means of lpo, iqv and
 # sex, respectively. Variables iqd and lpd will hold the values of iqv and lpo
@@ -140,9 +178,19 @@ meth <- make.method(d)
 meth[c("lpo", "iqv", "sex")] <- "2l.pmm"
 
 pred <- make.predictorMatrix(d)
-pred[,] <- 0
+pred[,] <- 0  # set all cells to 0
 pred[, "sch"] <- -2
 codes <- c(3, 3, rep(1, 6))
+
+# "iqd.sex" = 2-way interaction of L1 vars scaled as deviations from clust means
+# "sex.den" = cross-level interaction
+# "iqd.den" = cross-level interaction
+# "lpd.den" = cross-level interaction
+# "iqm.den" = interaction at level 2
+# "lpm.den" = interaction at level 2
+# "sxm.den" = interaction at level 2
+
+
 pred["lpo", c("iqv", "sex", "iqd.sex", "sex.den", "iqd.den",
               "den", "iqm.den", "sxm.den")] <- codes
 pred["iqv", c("lpo", "sex", "lpd.sex", "sex.den", "lpd.den",
@@ -150,10 +198,18 @@ pred["iqv", c("lpo", "sex", "lpd.sex", "sex.den", "lpd.den",
 pred["sex", c("lpo", "iqv", "iqd.lpd", "lpd.den", "iqd.den",
               "den", "iqm.den", "lpm.den")] <- codes
 
+# "iqd.sex" = 2-way interaction of L1 vars scaled as deviations from clust mean
+# "lpd.sex" = 2-way interaction of L1 vars scaled as deviations from clust mean
+# "iqd.lpd" = 2-way interaction of L1 vars scaled as deviations from clust mean
+
 # level-2 variables
 meth["den"] <- "2lonly.pmm"
 pred["den", c("lpo", "iqv", "sex",
               "iqd.sex", "lpd.sex", "iqd.lpd")] <- 1
+
+
+# t(pred)[-1,c("lpo", "iqv", "sex", "den")]
+
 
 # The 2l.groupmean method from the miceadds package returns the cluster mean
 # pertaining to each observation. Centering on the cluster means is widely
@@ -200,7 +256,7 @@ visit <- c("lpo", "lpm", "lpd",
            "iqm.den", "sxm.den", "lpm.den")
 
 imp <- mice(d, pred = pred, meth = meth, seed = 188,
-            visit = visit, m = 10, print = FALSE,
+            visit = visit, m = 10, print = TRUE,
             allow.na = TRUE)
 
 long <- mice::complete(imp, "long", include = TRUE)
@@ -220,7 +276,7 @@ summary(pool(fit))
 
 # 7.10.6 ------------------------------------------------------------------
 
-
+# Random slopes, missing outcomes and predictors
 
 d <- brandsma[, c("sch", "lpo", "iqv")]
 
@@ -266,7 +322,11 @@ testEstimates(as.mitml.result(fit), extra.pars = TRUE)$extra.pars
 
 # 7.10.7 ------------------------------------------------------------------
 
+# Random slopes, interactions
+
 # CF: this section is incomplete
+
+# pad the data with the set of all relevant interactions from model
 
 d <- brandsma[, c("sch", "lpo", "iqv", "ses")]
 d$lpo <- as.vector(scale(d$lpo, scale = FALSE))

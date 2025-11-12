@@ -10,7 +10,7 @@
 rm(list=ls())
 
 library(ReIns) #for generating random numbers from log-normal distribution 
-library(splitstackshape) #to exapand the rows
+library(splitstackshape) #to expand the rows
 library(boot)#for inverting the logit function 
 library(dplyr)
 library(DataCombine) #for the slide function 
@@ -189,27 +189,26 @@ sd_sdqL1 <- 3.0
   #drop variables
   D <- D %>% dplyr::select(!contains("L3")& !contains("L2"))
 
-  ##########MIssing data generation######################
+  ########## Missing data generation ######################
   
 
   D <- D %>% group_by(school) %>% 
-    mutate(L3_RE_r_dep = rnorm(1,0,0.01),L3_RE_r_NAPLAN = rnorm(1,0,0.4),L3_RE_r_sdq=rnorm(1,0,0.8) )
+    mutate(L3_RE_r_dep = rnorm(1,0,0.01),
+           L3_RE_r_NAPLAN = rnorm(1,0,0.4),
+           L3_RE_r_sdq =rnorm(1,0,0.8) )
   
   D <- D %>% group_by(c_id) %>% 
-    mutate(L2_RE_r_dep = rnorm(1,0,0.05),L2_RE_r_NAPLAN = rnorm(1,0,2.0),L2_RE_r_sdq = rnorm(1,0,1.2) )
+    mutate(L2_RE_r_dep = rnorm(1,0,0.05),
+           L2_RE_r_NAPLAN = rnorm(1,0,2.0),
+           L2_RE_r_sdq = rnorm(1,0,1.2) )
   
   #missing data generation in prev_dep
-  D$r_prev_dep <- as.numeric(runif(3600,0,1)<inv.logit(-9.8+0.72*D$age+0.16*D$sex+(-0.17)*D$NAPLAN_w1+
-                                   (0.20)*(D$wave-1)+(-0.39)*D$ses_2+(0.27)*D$ses_3+(0.19)*D$ses_4+
-                                   (-0.03)*D$ses_5+(-0.13)*D$NAPLAN+(0.04)*D$prev_sdq+D$L3_RE_r_dep+D$L2_RE_r_dep))
+  D$r_prev_dep <- as.numeric(runif(3600,0,1) < inv.logit(-9.8+0.72*D$age+0.16*D$sex+ (-0.17)*D$NAPLAN_w1+(0.20)*(D$wave-1)+(-0.39)*D$ses_2+(0.27)*D$ses_3+(0.19)*D$ses_4+ (-0.03)*D$ses_5+(-0.13)*D$NAPLAN+(0.04)*D$prev_sdq+D$L3_RE_r_dep+D$L2_RE_r_dep))
   
   D$r_prev_dep <- as.factor(D$r_prev_dep)
 
   #missing data generation in NAPLAN
-  D$r_NAPLAN <- as.numeric(runif(3600,0,1)<inv.logit(-22.8+1.77*D$age+0.01*D$sex+(-0.70)*D$NAPLAN_w1+
-                                                         (0.7)*D$wave+(-4.9)*D$ses_2+(-1.9)*D$ses_3+(2.19)*D$ses_4+
-                                                         (-2.35)*D$ses_5+(-0.25)*(as.numeric(D$prev_dep)-1)+(0.11)*D$prev_sdq+
-                                                       D$L3_RE_r_NAPLAN+D$L2_RE_r_NAPLAN))
+  D$r_NAPLAN <- as.numeric(runif(3600,0,1)<inv.logit(-22.8+1.77*D$age+0.01*D$sex+(-0.70)*D$NAPLAN_w1+(0.7)*D$wave+(-4.9)*D$ses_2+(-1.9)*D$ses_3+(2.19)*D$ses_4+(-2.35)*D$ses_5+(-0.25)*(as.numeric(D$prev_dep)-1)+(0.11)*D$prev_sdq+D$L3_RE_r_NAPLAN+D$L2_RE_r_NAPLAN))
 
   D$r_NAPLAN <- as.factor(D$r_NAPLAN)
   

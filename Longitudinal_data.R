@@ -27,7 +27,7 @@ summary(CATS_long)
 sum(complete.cases(CATS_long))
 mean(!complete.cases(CATS_long)) # 0.46
 
-mice::md.pattern(CATS_long)
+mice::md.pattern(CATS_long, rotate.names = T)
 
 # fit analysis models
 
@@ -39,7 +39,14 @@ lmer(numeracy_score ~ prev_dep + time + age + numeracy_scoreW1 + sex +
 lmer(numeracy_score ~ prev_dep + time + age + numeracy_scoreW1 + sex +
     factor(ses) + (1 | school/id), data = CATS_long)
 
-###------------------------------------Illustration of the reshape() function--------------------------------------------
+# 
+# ggplot(CATS_long) +
+#   aes(x = time, y = numeracy_score) +
+#   geom_line(mapping = aes(group = id)) +
+#   geom_smooth(method = "lm")
+
+# Illustration of the reshape() function ----------------------------------
+
 
 # Reshaping CATS_long (in long format) to wide format
 CATS_wide <- reshape(CATS_long, 
@@ -49,6 +56,7 @@ CATS_wide <- reshape(CATS_long,
                      direction = "wide")
 
 # CF: using pivot_wider
+library(tidyr)
 CATS_wide <- CATS_long |> 
   pivot_wider(
     names_from = time,
@@ -87,9 +95,9 @@ CATS_long <- CATS_wide |>
                names_sep = "\\.")
 
 
-###-------------------------------------------Imputing in wide format-----------------------------------------------------
 
-# Section 3.1.1
+# Section 3.1.1 -----------------------------------------------------------
+
 
 #-------------------------#
 # Approach 1: JM-1L-wide  #
@@ -113,14 +121,16 @@ dataw_inc <- CATS_wide[, substr(names(CATS_wide), 1, 6) %in% c("prev_d",
 # be included as type numeric.  To include fully observed categorical variables
 # with k (>2) categories, (k-1) dummy variables need to be created.
 
-dataw_comp <- cbind(Intercept = rep(1, nrow(CATS_wide)), CATS_wide[, substr(names(CATS_wide),
-    1, 6) %in% c("age", "sex", "prev_s")])
+dataw_comp <- cbind(Intercept = rep(1, nrow(CATS_wide)), 
+                    CATS_wide[, substr(names(CATS_wide), 1, 6) %in% 
+                                c("age", "sex", "prev_s")])
 
 # Step 3: Perform imputations (set number of imputations using nimp, burn in
 # iterations using nburn and between imputations using between options)
 # CF: This takes a while to run; I changed nimp to 5
 set.seed(2946)
-imp1 <- jomo(Y = dataw_inc, X = dataw_comp, nimp = 5, nburn = 1000, nbetween = 1000)
+imp1 <- jomo(Y = dataw_inc, X = dataw_comp, 
+             nimp = 5, nburn = 1000, nbetween = 1000)
 
 # Step 4 : Check convergence of imputation procedure
 set.seed(2946)
@@ -139,7 +149,7 @@ plot(c(1:1000), impCheck$collectbeta[1, 1, 1:1000],
      xlab = "Iteration number")
 
 ######### Analyze imputed data by fitting substantive model to each
-######### imputed data set and combine using Rubins rules
+######### imputed data set and combine using Rubin's rules
 
 # Step 1: Extract imputed datasets and store in a list
 imp.list <- imputationList(split(imp1, imp1$Imputation)[-1])
@@ -162,7 +172,9 @@ fit.imp1 <- lapply(imp.long, function(d) {
 mitml::testEstimates(fit.imp1, extra.pars = TRUE)
 
 
-# Section 3.1.2
+# Section 3.1.2 -----------------------------------------------------------
+
+
 
 #----------------------------#
 # Approach 2: FCS-1L-wide    #
@@ -175,6 +187,14 @@ CATS_wide[cat.vars] <- lapply(CATS_wide[cat.vars], factor)
 ######### Create imputations
 
 # Step 1: Set predictor matrix
+
+# The predictors to be used in each univariate model are specified via a single
+# square “predictor matrix,” of dimension equal to the number of variables in
+# the dataset, with both rows and columns representing the variables in the 
+# order in which they appear in the dataset. A cell with a “1” indicates that
+# the column variable is included as a predictor in the imputation model for the
+# row variable and “0” indicates that the column variable is omitted.
+
 
 # In the predictor matrix...
 
@@ -194,17 +214,23 @@ CATS_wide[cat.vars] <- lapply(CATS_wide[cat.vars], factor)
 pred1 <- make.predictorMatrix(CATS_wide)
 pred1[, c("id", "school")] <- 0
 
-# Step 2: Set imputation methods (logreg,norm,and polr for specifying a logistic
-# regression model,linear regression model and a proportional odds model
+# Step 2: Set imputation methods (logreg, norm,and polr for specifying a logistic
+# regression model, linear regression model, and a proportional odds model
 # respectively)
 meth1 <- make.method(CATS_wide)
 meth1[substr(names(CATS_wide), 1, 6) %in% c("prev_d")] <- "logreg"
 meth1[substr(names(CATS_wide), 1, 6) %in% c("numera")] <- "norm"
 meth1[substr(names(CATS_wide), 1, 5) %in% c("ses")] <- "polr"
 
-# Step 3: Perform imputations (set number of imputations using m,predictors using
-# predictorMatrix imputation method using method and burn in iterations using
+# Step 3: Perform imputations (set number of imputations using m, predictors using
+# predictorMatrix, imputation method using method, and burn in iterations using
 # maxit options)
+
+# imputations are drawn for each variable in turn, cycling through each of the
+# incomplete variables, and repeating the procedure for a specified number of
+# iterations (t =1, . . . , T) until convergence. Set iterations with maxit
+# argument. In most practical applications of FCS, a low number of iterations
+# (between 5 and 20) is usually enough to achieve convergence
 set.seed(3726)
 imp2 <- mice(data = CATS_wide, m = 5, 
              predictorMatrix = pred1, 
@@ -215,7 +241,7 @@ imp2 <- mice(data = CATS_wide, m = 5,
 plot(imp2, c("prev_dep.3", "prev_dep.5", "prev_dep.7"))
 
 ######### Analyze imputed data by fitting substantive model to each
-######### imputed data set and combine using Rubins rules
+######### imputed data set and combine using Rubin's rules
 
 # Step 1: Extract imputed datasets and store in a list
 imp.list <- complete(imp2, "all")
@@ -237,7 +263,9 @@ fit.imp2 <- lapply(imp.long, function(d) {
 # Step 4: Pool the results
 testEstimates(fit.imp2, extra.pars = TRUE)
 
-# Section 3.1.3
+
+# Section 3.1.3 -----------------------------------------------------------
+
 
 #---------------------------------#
 # Approach 3: FCS-1L-wide-MTW     #
@@ -263,11 +291,19 @@ CATS_wide[cat.vars] <- lapply(CATS_wide[cat.vars], factor)
 # more appropriate
 pred2 <- make.predictorMatrix(CATS_wide)
 pred2[, c("id", "school")] <- 0
-pred2["numeracy_scoreW1", c(grep("5", names(CATS_wide)), grep("7", names(CATS_wide)))] <- 0
-pred2[c("prev_dep.3", "prev_sdq.3", "numeracy_score.3"), grep("7", names(CATS_wide))] <- 0
-pred2[c("prev_dep.5", "prev_sdq.5", "numeracy_score.5"), "numeracy_scoreW1"] <- 0
-pred2[c("prev_dep.7", "prev_sdq.7", "numeracy_score.7"), grep("3", names(CATS_wide))] <- 0
-pred2[c("prev_dep.7", "prev_sdq.7", "numeracy_score.7"), "numeracy_scoreW1"] <- 0
+pred2["numeracy_scoreW1", c(grep("5", names(CATS_wide)), 
+                            grep("7", names(CATS_wide)))] <- 0
+
+pred2[c("prev_dep.3", "prev_sdq.3", "numeracy_score.3"), 
+      grep("7", names(CATS_wide))] <- 0
+
+pred2[c("prev_dep.5", "prev_sdq.5", "numeracy_score.5"), 
+      "numeracy_scoreW1"] <- 0
+
+pred2[c("prev_dep.7", "prev_sdq.7", "numeracy_score.7"), 
+      grep("3", names(CATS_wide))] <- 0
+pred2[c("prev_dep.7", "prev_sdq.7", "numeracy_score.7"), 
+      "numeracy_scoreW1"] <- 0
 
 # Step 2: Set imputation methods
 meth2 <- make.method(CATS_wide)
@@ -279,11 +315,11 @@ meth2[substr(names(CATS_wide), 1, 5) %in% c("c_ses")] <- "polr"
 # m,predictors using predictorMatrix imputation method using method
 # and burn in iterations using maxit options)
 set.seed(8920)
-imp3 <- mice(data = CATS_wide, m = 66, predictorMatrix = pred2, method = meth2,
+imp3 <- mice(data = CATS_wide, m = 5, predictorMatrix = pred2, method = meth2,
     maxit = 10)
 
 ######### Analyze imputed data by fitting substantive model to each
-######### imputed data set and combine using Rubins rules
+######### imputed data set and combine using Rubin's rules
 
 # Step 1: Extract imputed datasets and store in a list
 imp.list <- complete(imp3, "all")
@@ -305,9 +341,9 @@ fit.imp3 <- lapply(imp.long, function(d) {
 # Step 4: Pool the results
 testEstimates(fit.imp3, extra.pars = TRUE)
 
-###------------------------------------------------------Imputing in long format--------------------------------------------
 
-# Section 3.2.1
+
+# Section 3.2.1 -----------------------------------------------------------
 
 #-------------------------#
 # Approach 4: JM-2L       #
@@ -322,11 +358,11 @@ CATS_long[, "prev_dep"] <- as.factor(CATS_long[, "prev_dep"])
 
 # Step 1: Create a data frame with variables to be imputed
 
-# Level 1 variables
+# Level 1 variables: varies within subjects
 dataL_inc1 <- data.frame(prev_dep = CATS_long[, c("prev_dep")], 
                          numeracy_score = CATS_long[,c("numeracy_score")])
 
-# Level 2 variables
+# Level 2 variables: does not vary within subject
 dataL_inc2 <- data.frame(ses = CATS_long[, c("ses")], 
                          numeracy_scoreW1 = CATS_long[,c("numeracy_scoreW1")])
 
@@ -410,7 +446,9 @@ fit.imp4 <- lapply(imp.list, function(d) {
 # Step 3: Pool the results
 testEstimates(fit.imp4, extra.pars = TRUE)
 
-# Section 3.2.2
+
+# Section 3.2.2 -----------------------------------------------------------
+
 
 #-------------------------#
 # Approach 5: FCS-2L      #
@@ -474,7 +512,7 @@ meth3["numeracy_scoreW1"] <- "2lonly.pmm"
 # Step 3: Perform imputations (set number of imputations using m, predictors
 # using predictorMatrix imputation method using method, and burn in iterations
 # using maxit options)
-library(miceadds)
+library(miceadds)  # for "2l.pmm"
 set.seed(3528)
 imp5 <- mice(data = CATS_long, m = 5, 
              predictorMatrix = pred3, 
